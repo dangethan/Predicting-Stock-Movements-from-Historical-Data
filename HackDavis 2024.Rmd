@@ -1,0 +1,154 @@
+---
+title: "HackDavis"
+author: "Ethan Dang"
+date: "2024-04-28"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Predicting Stock Movements from Historical Data
+
+**Objective:** Use historical stock price data to predict future price movements using time series forecasting models.
+
+**Hypothesis:** Historical stock price data can accurately forecast future stock prices up to one month ahead using ARIMA models.
+
+```{r message=FALSE}
+library(quantmod)
+library(forecast)
+library(lubridate)
+library(xts)
+library(reshape2)
+library(ggplot2)
+```
+
+```{r}
+# Data Acquisition
+symbol <- "INTC"
+end_date <- as.Date("2024-03-31")
+getSymbols(symbol, src = "yahoo", from = Sys.Date() - years(5), to = end_date)
+INTC.Close <- Cl(INTC)
+
+# Visualization of INTC Closing Price
+plot(INTC.Close, main=paste("Closing Prices of Intel Corporation (INTC)"), col='blue')
+
+# Data Preparation
+train_end <- as.Date("2024-02-29") 
+test_start <- as.Date("2024-03-01") 
+test_end <- as.Date("2024-03-31")
+
+# Create the training and test datasets
+train_data <- window(INTC.Close, end = train_end)
+test_data <- window(INTC.Close, start = test_start, end = test_end)
+
+# Mode Development and Forecasting
+fit <- auto.arima(train_data)
+summary(fit)
+forecasts <- forecast(fit, length(test_data))
+
+# Statistical Significance of My Model
+coefficients <- c(ma1 = -0.1617, ma2 = 0.1178)
+standard_errors <- c(ma1 = 0.0283, ma2 = 0.0291)
+# T-statistics
+t_stats <- coefficients / standard_errors
+# P-values
+p_values <- 2 * pt(-abs(t_stats), df = length(train_data) - length(coefficients))
+# Results
+data.frame(Coefficients = coefficients, 
+           StandardErrors = standard_errors, 
+           TStatistics = t_stats, 
+           PValues = p_values)
+```
+
+The MA1 term is negative, suggesting that it acts to reverse the previous error. The p-value indicates that this coefficient is statistically significant at the 5% significance level. This indicates strong evidence to reject the null hypothesis of this coefficient being zero, thus suggesting that the MA1 term contributes to the model.
+
+The MA2 term is positive, suggesting a reinforcing effect of the lagged error term on the current value. The p-value indicates that this coefficient is statistically significant at the 5% significance level. This indicates strong evidence to reject the null hypothesis of this coefficient being zero, thus suggesting that the MA2 term contributes to the model.
+
+```{r}
+# Plot the Forecast
+plot(forecasts)
+
+# Accuracy of Model
+accuracy(forecasts, test_data)
+```
+
+In assessing the performance of the ARIMA model used for forecasting stock prices, it's crucial to understand the metrics used to evaluate its accuracy and effectiveness.
+
+**Root Mean Square Error (RMSE)** measures the average magnitude of the errors between predicted and actual values. A lower RMSE indicates a better fit, as it suggests smaller average errors.
+
+**Mean Absolute Error** measures the average of the absolute differences between predicted and actual values. A lower MAE indicates fewer deviations from the actual values, signaling a more accurate model.
+
+**Mean Absolute Percentage Error** measures how large the predicted errors are in comparison to the actual values. A lower MAPE value indicates the model's predictions are closer in proportion to the actual values.
+
+In this statistical report, I observed that the model performed reasonably well on the training data, but showed some degradation when applied to the test set. This is typical in time series forecasting because they often capture patterns specific to the training data which many not generalize well to new data. The increase in RMSE and MAE from the training set to the test set suggests that the model may not be capturing all dynamics in the data. This could arise from overfitting, underfitting, or the inherently unpredictable nature of stock price movements. Furthermore, the MAPE values indicate that while the model provides a reasonable approximation of the actual data there is still room for improvement. Especially for practical applications where lower error margins are crucial.
+
+Nonetheless, based on the analysis and results obtained from applying the ARIMA model to historical stock price data of Intel Corporation, the hypothesis that historical stock price data can accurately forecast future stock prices up to one month ahead using ARIMA models is partially supported. While the model demonstrated reasonable accuracy on the training data, the observed increase in error metrics like RMSE and MAE on the test set indicates some limitations in the model's predictive capability. This suggests that while ARIMA models can provide useful forecasts, their accuracy may vary, and they might not fully capture all the dynamics of the stock market data. Therefore, the hypothesis holds with the caveat that the accuracy and reliability of predictions can be influenced by factors like model fit, data characteristics, and inherent market volatility. 
+
+**Top Tech Companies:**
+```{r}
+# Define the function to process multiple symbols
+forecast_accuracy <- function(symbols) {
+  results <- data.frame(Symbol = character(), 
+                        RMSE = double(), 
+                        MAE = double(), 
+                        MAPE = double(), stringsAsFactors = FALSE)
+  
+  for (symbol in symbols) {
+    # Data Acquisition
+    end_date <- as.Date("2024-03-31")
+    getSymbols(symbol, src = "yahoo", from = Sys.Date() - years(5), to = end_date)
+    stock_close <- Cl(get(symbol))
+    
+    # Data Preparation
+    train_end <- as.Date("2024-02-29")
+    test_start <- as.Date("2024-03-01")
+    test_end <- as.Date("2024-03-31")
+    
+    # Create training and test datasets
+    train_data <- window(stock_close, end = train_end)
+    test_data <- window(stock_close, start = test_start, end = test_end)
+    
+    # Model Development and Forecasting
+    fit <- auto.arima(train_data)
+    forecasts <- forecast(fit, length(test_data))
+    
+    # Compute accuracy
+    acc <- accuracy(forecasts, test_data)
+    
+    # Collect results
+    results <- rbind(results, data.frame(Symbol = symbol, 
+                                         RMSE = acc["Test set", "RMSE"], 
+                                         MAE = acc["Test set", "MAE"], 
+                                         MAPE = acc["Test set", "MAPE"]))
+  }
+  
+  results <- results[order(results$MAPE),] 
+  return(results)
+}
+
+# List of symbols to process
+symbols <- c("INTC", "AAPL", "MSFT", "GOOGL", "AMZN", "META")
+
+# Run the function and store the results
+accuracy_results <- forecast_accuracy(symbols)
+
+# Results
+print(accuracy_results)
+
+# Reshape the accuracy results for plotting
+accuracy_results_long <- melt(accuracy_results, id.vars = "Symbol", variable.name = "Metric", value.name = "Value")
+
+# Plotting the bar chart
+ggplot(accuracy_results_long, aes(x = Symbol, y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Comparison of RMSE, MAE, and MAPE Across Different Companies",
+       x = "Company",
+       y = "Error Metric Value") +
+  theme_minimal()
+```
+
+The results table is organized to show the RMSE, MAE, and MAPE for each company. The results are sorted by MAPE, which gives a relative measure of the error in terms of the actual values, providing a sense of the error magnitude in percentage terms. Amazon shows the lowest errors across all metrics, making it the most accurately forecasted stock among the companies listed. The low MAPE of 1.12% suggests that the ARIMA model predictions were very close to the actual stock prices, indicating high model efficacy for Amazon’s stock data. Microsoft and Meta follow, with Microsoft displaying a slightly better forecast accuracy in terms of MAPE compared to Meta, though both have higher absolute errors than Amazon. Google and Apple show higher errors in all measures, especially in MAPE, suggesting that their stock price movements might be more volatile or less predictable by the ARIMA model used. This could be due to various factors, such as market dynamics, company-specific news, or economic factors impacting these stocks more significantly.
+
+The varying levels of accuracy across these tech giants underscore the importance of considering company-specific characteristics and external factors when modeling stock prices. Lower MAPE values suggest more reliable forecasts, which can be crucial for investment strategies and risk management. Nonetheless, the varying levels of accuracy across these tech giants underscore the importance of considering company-specific characteristics and external factors when modeling stock prices. Lower MAPE values suggest more reliable forecasts, which can be crucial for investment strategies and risk management.
